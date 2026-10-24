@@ -13,6 +13,7 @@ on:
   push:
     branches:
       - main
+      - test/windows-winlibs-config
     tags:
       - v*.*.*
   workflow_dispatch:
@@ -39,6 +40,17 @@ env:
 
 jobs:
   build:
+    name: Windows ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: branch
+            ref: ""
+            repository: shivammathur/frankenphp
+          - name: v1.13.3
+            ref: v1.13.3
+            repository: php/frankenphp
     permissions:
       contents: write
       id-token: write
@@ -56,7 +68,7 @@ jobs:
           "REF=$ref" >> $env:GITHUB_ENV
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REF: ${{ (github.ref_type == 'tag' && github.ref_name) || (github.event_name == 'workflow_dispatch' && inputs.version) || '' }}
+          REF: ${{ matrix.ref }}
 
       - name: Configure Git
         run: |
@@ -67,6 +79,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.REF || '' }}
+          repository: ${{ matrix.repository }}
           path: frankenphp
           persist-credentials: false
 
@@ -86,7 +99,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: winlibs-config
-          sparse-checkout: winlibs.json
+          sparse-checkout: |
+            winlibs.json
+            compat-smoke.py
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
@@ -215,28 +230,32 @@ jobs:
           Copy-Item frankenphp\deps\bin\brotlicommon.dll $env:DIR_NAME
           Copy-Item frankenphp\deps\bin\pthreadVC3.dll $env:DIR_NAME
 
+      - name: Validate packaged Winlibs runtime
+        if: env.BUILD_RELEASE == 'true'
+        run: |
+          python -m pip install brotli
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($dll in @('brotlicommon.dll', 'brotlidec.dll', 'brotlienc.dll', 'pthreadVC3.dll')) {
+            $source = (Get-FileHash "frankenphp\deps\bin\$dll" -Algorithm SHA256).Hash
+            $packaged = (Get-FileHash "$env:DIR_NAME\$dll" -Algorithm SHA256).Hash
+            if ($source -ne $packaged) { throw "Packaged DLL differs: $dll" }
+            Write-Host "$dll SHA256=$packaged"
+          }
+          $env:PATH = ($env:PATH -split ';' | Where-Object { $_ -notmatch '\\frankenphp\\deps\\bin|\\watcher$' }) -join ';'
+          python winlibs-config\compat-smoke.py "$env:DIR_NAME\frankenphp.exe" winlibs-brotli-pthreads
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Upload Artifact
-        if: env.BUILD_RELEASE == 'true' && !env.REF
+        if: env.BUILD_RELEASE == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: ${{ env.DIR_NAME }}
+          name: ${{ env.DIR_NAME }}-${{ matrix.name }}
           path: ${{ env.DIR_NAME }}
           if-no-files-found: error
 
       - name: Zip Release Artifact
         if: ${{ env.REF }}
         run: Compress-Archive -Path "$env:DIR_NAME\*" -DestinationPath "$env:DIR_NAME.zip"
-
-      - name: Upload Release Asset
-        if: ${{ env.REF }}
-        run: gh release upload "$env:REF" "$env:DIR_NAME.zip" --repo php/frankenphp --clobber
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - if: ${{ env.REF }}
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
-        with:
-          subject-path: ${{ github.workspace }}\${{ env.DIR_NAME }}.zip
 
       - name: Run Tests
         run: |
