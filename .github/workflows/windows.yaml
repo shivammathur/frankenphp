@@ -81,22 +81,25 @@ jobs:
           working-directory: frankenphp
           cache: ${{ !env.REF }}
 
-      - name: Determine runner image
-        id: image
-        run: '"version=$env:ImageVersion" >> $env:GITHUB_OUTPUT'
-
-      # SourceForge sometimes serves runners a non-archive body for pthreads sources; release runs skip the cache
-      - name: Cache Vcpkg Packages # zizmor: ignore[cache-poisoning]
-        if: ${{ !env.REF }}
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # Keep the configuration available when rebuilding older release tags.
+      - name: Checkout Winlibs configuration
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          path: ~\AppData\Local\vcpkg\archives
-          key: vcpkg-${{ runner.os }}-${{ steps.image.outputs.version }}-${{ hashFiles('frankenphp/vcpkg.json') }}
-          restore-keys: vcpkg-${{ runner.os }}-
+          path: winlibs-config
+          sparse-checkout: winlibs.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
 
-      - name: Install Vcpkg Libraries
+      - name: Download Windows dependencies
         working-directory: frankenphp
-        run: "vcpkg install"
+        run: |
+          $config = Get-Content -Raw "$env:GITHUB_WORKSPACE\winlibs-config\winlibs.json" | ConvertFrom-Json
+          foreach ($dependency in $config.dependencies) {
+            $url = $dependency.url.Replace('{version}', $dependency.version).Replace('{vs}', $config.vs).Replace('{arch}', $config.arch)
+            $archive = "$env:TEMP\$($dependency.name).zip"
+            Invoke-WebRequest -Uri $url -OutFile $archive
+            Expand-Archive -Path $archive -DestinationPath "deps" -Force
+          }
 
       - name: Download Watcher
         run: |
@@ -139,18 +142,18 @@ jobs:
 
       - name: Prepare env
         run: |
-          $vcpkgRoot = "$env:GITHUB_WORKSPACE\frankenphp\vcpkg_installed\x64-windows"
+          $depsRoot = "$env:GITHUB_WORKSPACE\frankenphp\deps"
           $watcherRoot = "$env:GITHUB_WORKSPACE\watcher"
           $phpBin = "$env:GITHUB_WORKSPACE\$env:DIR_NAME"
           $phpDevel = "$env:GITHUB_WORKSPACE\php-devel\php-$env:PHP_VERSION-devel-vs17-x64"
 
           "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\Llvm\bin" >> $env:GITHUB_PATH
-          "$vcpkgRoot\bin" >> $env:GITHUB_PATH
+          "$depsRoot\bin" >> $env:GITHUB_PATH
           "$watcherRoot" >> $env:GITHUB_PATH
           "$phpBin" >> $env:GITHUB_PATH
 
-          "CGO_CFLAGS=-DFRANKENPHP_VERSION=$env:FRANKENPHP_VERSION -I$vcpkgRoot\include -I$watcherRoot -I$phpDevel\include -I$phpDevel\include\main -I$phpDevel\include\TSRM -I$phpDevel\include\Zend -I$phpDevel\include\ext" >> $env:GITHUB_ENV
-          "CGO_LDFLAGS=-L$vcpkgRoot\lib -lbrotlienc -L$watcherRoot -llibwatcher-c -L$phpBin -L$phpDevel\lib -lphp8ts -lphp8embed" >> $env:GITHUB_ENV
+          "CGO_CFLAGS=-DFRANKENPHP_VERSION=$env:FRANKENPHP_VERSION -I$depsRoot\include -I$watcherRoot -I$phpDevel\include -I$phpDevel\include\main -I$phpDevel\include\TSRM -I$phpDevel\include\Zend -I$phpDevel\include\ext" >> $env:GITHUB_ENV
+          "CGO_LDFLAGS=-L$depsRoot\lib -lbrotlienc -L$watcherRoot -llibwatcher-c -L$phpBin -L$phpDevel\lib -lphp8ts -lphp8embed" >> $env:GITHUB_ENV
         env:
           FRANKENPHP_VERSION: ${{ steps.version.outputs.version }}
 
@@ -207,10 +210,10 @@ jobs:
         run: |
           Copy-Item frankenphp\caddy\frankenphp\frankenphp.exe $env:DIR_NAME
           Copy-Item watcher\libwatcher-c.dll $env:DIR_NAME
-          Copy-Item frankenphp\vcpkg_installed\x64-windows\bin\brotlienc.dll $env:DIR_NAME
-          Copy-Item frankenphp\vcpkg_installed\x64-windows\bin\brotlidec.dll $env:DIR_NAME
-          Copy-Item frankenphp\vcpkg_installed\x64-windows\bin\brotlicommon.dll $env:DIR_NAME
-          Copy-Item frankenphp\vcpkg_installed\x64-windows\bin\pthreadVC3.dll $env:DIR_NAME
+          Copy-Item frankenphp\deps\bin\brotlienc.dll $env:DIR_NAME
+          Copy-Item frankenphp\deps\bin\brotlidec.dll $env:DIR_NAME
+          Copy-Item frankenphp\deps\bin\brotlicommon.dll $env:DIR_NAME
+          Copy-Item frankenphp\deps\bin\pthreadVC3.dll $env:DIR_NAME
 
       - name: Upload Artifact
         if: env.BUILD_RELEASE == 'true' && !env.REF

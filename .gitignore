@@ -12,7 +12,7 @@
 /internal/testcli/testcli
 /package/etc/php.ini
 /super-linter-output
-/vcpkg_installed/
+/deps/
 /watcher/
 .DS_Store
 .idea/

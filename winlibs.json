@@ -1,0 +1,16 @@
+{
+  "vs": "vs17",
+  "arch": "x64",
+  "dependencies": [
+    {
+      "name": "brotli",
+      "version": "1.2.1",
+      "url": "https://downloads.php.net/~windows/php-sdk/deps/{vs}/{arch}/brotli-{version}-{vs}-{arch}.zip"
+    },
+    {
+      "name": "pthreads",
+      "version": "3.0.0",
+      "url": "https://downloads.php.net/~windows/pecl/deps/pthreads-{version}-{vs}-{arch}.zip"
+    }
+  ]
+}

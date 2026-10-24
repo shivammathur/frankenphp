@@ -105,40 +105,38 @@ curl -v http://127.0.0.1:8080/phpinfo.php
    winget install -e --id Git.Git
    ```
 
-3. Install vcpkg:
-
-   ```powershell
-   cd C:\
-   git clone https://github.com/microsoft/vcpkg
-   .\vcpkg\bootstrap-vcpkg.bat
-   ```
-
-4. [Download the latest version of the watcher library for Windows](https://github.com/e-dant/watcher/releases) and extract it to a directory named `C:\watcher`
-5. [Download the latest **Thread Safe** version of PHP and of the PHP SDK for Windows](https://windows.php.net/download/), extract them in directories named `C:\php` and `C:\php-devel`
-6. Clone the FrankenPHP Git repository:
+3. [Download the latest version of the watcher library for Windows](https://github.com/e-dant/watcher/releases) and extract it to a directory named `C:\watcher`
+4. [Download the latest **Thread Safe** version of PHP and of the PHP SDK for Windows](https://windows.php.net/download/), extract them in directories named `C:\php` and `C:\php-devel`
+5. Clone the FrankenPHP Git repository:
 
    ```powershell
    git clone https://github.com/php/frankenphp C:\frankenphp
    cd C:\frankenphp
    ```
 
-7. Install the dependencies:
+6. Download the Windows dependencies configured in `winlibs.json`:
 
    ```powershell
-   C:\vcpkg\vcpkg.exe install
+   $config = Get-Content -Raw winlibs.json | ConvertFrom-Json
+   foreach ($dependency in $config.dependencies) {
+     $url = $dependency.url.Replace('{version}', $dependency.version).Replace('{vs}', $config.vs).Replace('{arch}', $config.arch)
+     $archive = "$env:TEMP\$($dependency.name).zip"
+     Invoke-WebRequest -Uri $url -OutFile $archive
+     Expand-Archive -Path $archive -DestinationPath "deps" -Force
+   }
    ```
 
-8. Configure the needed environment variables (PowerShell):
+7. Configure the needed environment variables (PowerShell):
 
    ```powershell
    $env:PATH += ';C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\Llvm\bin'
    $env:CC = 'clang'
    $env:CXX = 'clang++'
-   $env:CGO_CFLAGS = "-O0 -g -IC:\frankenphp\vcpkg_installed\x64-windows\include -IC:\watcher -IC:\php-devel\include -IC:\php-devel\include\main -IC:\php-devel\include\TSRM -IC:\php-devel\include\Zend -IC:\php-devel\include\ext"
-   $env:CGO_LDFLAGS = '-LC:\frankenphp\vcpkg_installed\x64-windows\lib -lbrotlienc -LC:\watcher -llibwatcher-c -LC:\php -LC:\php-devel\lib -lphp8ts -lphp8embed'
+   $env:CGO_CFLAGS = "-O0 -g -IC:\frankenphp\deps\include -IC:\watcher -IC:\php-devel\include -IC:\php-devel\include\main -IC:\php-devel\include\TSRM -IC:\php-devel\include\Zend -IC:\php-devel\include\ext"
+   $env:CGO_LDFLAGS = '-LC:\frankenphp\deps\lib -lbrotlienc -LC:\watcher -llibwatcher-c -LC:\php -LC:\php-devel\lib -lphp8ts -lphp8embed'
    ```
 
-9. Run the tests:
+8. Run the tests:
 
    ```powershell
    go test -race -ldflags '-extldflags="-fuse-ld=lld"' ./...
@@ -147,13 +145,13 @@ curl -v http://127.0.0.1:8080/phpinfo.php
    cd ..
    ```
 
-10. Build the binary:
+9. Build the binary:
 
-    ```powershell
-    cd caddy/frankenphp
-    go build -ldflags '-extldflags="-fuse-ld=lld"' -tags nobadger,nomysql,nopgx,deprecated_topic,deprecated_claim
-    cd ../..
-    ```
+   ```powershell
+   cd caddy/frankenphp
+   go build -ldflags '-extldflags="-fuse-ld=lld"' -tags nobadger,nomysql,nopgx,deprecated_topic,deprecated_claim
+   cd ../..
+   ```
 
 ## Building Docker images locally
 
